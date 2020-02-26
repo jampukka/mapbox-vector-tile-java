@@ -29,7 +29,6 @@ public final class MvtReaderTest {
 
     private static final double DOUBLE_DELTA = 1e-10;
     
-    private static final int NUMBER_OF_DIMENSIONS = 2;
     private static final int SRID = 0;
     
     @Test
@@ -150,8 +149,7 @@ public final class MvtReaderTest {
     
     private static GeometryFactory createGeometryFactory() {
         final PrecisionModel precisionModel = new PrecisionModel();
-        final PackedCoordinateSequenceFactory coordinateSequenceFactory = 
-                new PackedCoordinateSequenceFactory(PackedCoordinateSequenceFactory.DOUBLE, NUMBER_OF_DIMENSIONS);
+        final PackedCoordinateSequenceFactory coordinateSequenceFactory = new PackedCoordinateSequenceFactory();
         return new GeometryFactory(precisionModel, SRID, coordinateSequenceFactory);
     }
 }
