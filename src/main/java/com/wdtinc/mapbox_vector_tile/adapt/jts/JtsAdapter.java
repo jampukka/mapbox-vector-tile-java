@@ -341,7 +341,7 @@ public final class JtsAdapter {
 
             // Encode as MVT linestring or multi-linestring
             for (int i = 0; i < geom.getNumGeometries(); ++i) {
-                mvtGeom.addAll(linesToGeomCmds(geom.getGeometryN(i), mvtClosePath, cursor, 1));
+                mvtGeom.addAll(linesToGeomCmds((LineString) geom.getGeometryN(i), mvtClosePath, cursor, 1));
             }
 
         } else if(geom instanceof MultiPolygon || geom instanceof Polygon) {
@@ -355,9 +355,10 @@ public final class JtsAdapter {
 
                 // Add exterior ring
                 final LineString exteriorRing = nextPoly.getExteriorRing();
+                final CoordinateSequence exteriorRingCsq = exteriorRing.getCoordinateSequence();
 
                 // Area must be non-zero
-                final double exteriorArea = Area.ofRingSigned(exteriorRing.getCoordinates());
+                final double exteriorArea = Area.ofRingSigned(exteriorRingCsq);
                 if(((int) Math.round(exteriorArea)) == 0) {
                     continue;
                 }
@@ -365,7 +366,7 @@ public final class JtsAdapter {
                 // Check CCW Winding (must be positive area in original coordinate system, MVT is positive-y-down, so inequality is flipped)
                 // See: https://docs.mapbox.com/vector-tiles/specification/#winding-order
                 if(exteriorArea > 0d) {
-                    CoordinateArrays.reverse(exteriorRing.getCoordinates());
+                    CoordinateSequences.reverse(exteriorRingCsq);
                 }
 
                 nextPolyGeom.addAll(linesToGeomCmds(exteriorRing, mvtClosePath, cursor, 2));
@@ -375,9 +376,10 @@ public final class JtsAdapter {
                 for(int ringIndex = 0; ringIndex < nextPoly.getNumInteriorRing(); ++ringIndex) {
 
                     final LineString nextInteriorRing = nextPoly.getInteriorRingN(ringIndex);
+                    final CoordinateSequence ringCoordSeq = nextInteriorRing.getCoordinateSequence();
 
                     // Area must be non-zero
-                    final double interiorArea = Area.ofRingSigned(nextInteriorRing.getCoordinates());
+                    final double interiorArea = Area.ofRingSigned(ringCoordSeq);
                     if(((int)Math.round(interiorArea)) == 0) {
                         continue;
                     }
@@ -385,7 +387,7 @@ public final class JtsAdapter {
                     // Check CW Winding (must be negative area in original coordinate system, MVT is positive-y-down, so inequality is flipped)
                     // See: https://docs.mapbox.com/vector-tiles/specification/#winding-order
                     if(interiorArea < 0d) {
-                        CoordinateArrays.reverse(nextInteriorRing.getCoordinates());
+                        CoordinateSequences.reverse(ringCoordSeq);
                     }
 
                     // Interior ring area must be < exterior ring area, or entire geometry is invalid
@@ -430,7 +432,6 @@ public final class JtsAdapter {
      * @return list of commands
      */
     private static List<Integer> ptsToGeomCmds(final Geometry geom, final Vec2d cursor) {
-
         // Guard: empty geometry coordinates
         final Coordinate[] geomCoords = geom.getCoordinates();
         if(geomCoords.length <= 0) {
@@ -492,12 +493,11 @@ public final class JtsAdapter {
      * @return list of commands
      */
     private static List<Integer> linesToGeomCmds(
-            final Geometry geom,
+            final LineString geom,
             final boolean closeEnabled,
             final Vec2d cursor,
             final int minLineToLen) {
-
-        final Coordinate[] geomCoords = geom.getCoordinates();
+        final CoordinateSequence geomCoords = geom.getCoordinateSequence();
 
         // Calculate the geometry coordinate count for processing that supports ignoring repeated final points
         final int geomProcCoordCount;
@@ -505,12 +505,12 @@ public final class JtsAdapter {
 
             // Check geometry for repeated end points when closing (Polygon rings)
             final int repeatEndCoordCount = countCoordRepeatReverse(geomCoords);
-            geomProcCoordCount = geomCoords.length - repeatEndCoordCount;
+            geomProcCoordCount = geomCoords.size() - repeatEndCoordCount;
 
         } else {
 
             // No closing (Line strings)
-            geomProcCoordCount = geomCoords.length;
+            geomProcCoordCount = geomCoords.size();
         }
 
 
@@ -529,8 +529,7 @@ public final class JtsAdapter {
         final Vec2d mvtPos = new Vec2d();
 
         // Initial coordinate
-        Coordinate nextCoord = geomCoords[0];
-        mvtPos.set(nextCoord.x, nextCoord.y);
+        mvtPos.set(geomCoords.getX(0), geomCoords.getY(0));
 
         // Encode initial 'MoveTo' command
         geomCmds.add(GeomCmdHdr.cmdHdr(GeomCmd.MoveTo, 1));
@@ -549,8 +548,7 @@ public final class JtsAdapter {
         int lineToLength = 0;
 
         for(int i = 1; i < geomProcCoordCount; ++i) {
-            nextCoord = geomCoords[i];
-            mvtPos.set(nextCoord.x, nextCoord.y);
+            mvtPos.set(geomCoords.getX(i), geomCoords.getY(i));
 
             // Ignore duplicate MVT points in sequence
             if(!equalAsInts(cursor, mvtPos)) {
@@ -589,15 +587,18 @@ public final class JtsAdapter {
      * @param coords coordinates to check for duplicate points
      * @return number of duplicate points at the rear of the list
      */
-    private static int countCoordRepeatReverse(Coordinate[] coords) {
+    private static int countCoordRepeatReverse(CoordinateSequence coords) {
         int repeatCoords = 0;
 
-        final Coordinate firstCoord = coords[0];
-        Coordinate nextCoord;
+        final int firstX = (int) coords.getX(0);
+        final int firstY = (int) coords.getY(0);
+        int nextX;
+        int nextY;
 
-        for(int i = coords.length - 1; i > 0; --i) {
-            nextCoord = coords[i];
-            if(equalAsInts2d(firstCoord, nextCoord)) {
+        for(int i = coords.size() - 1; i > 0; --i) {
+            nextX = (int) coords.getX(i);
+            nextY = (int) coords.getY(i);
+            if(firstX == nextX && firstY == nextY) {
                 ++repeatCoords;
             } else {
                 break;
@@ -623,20 +624,6 @@ public final class JtsAdapter {
         geomCmds.add(ZigZag.encode((int)mvtPos.y - (int)cursor.y));
 
         cursor.set(mvtPos);
-    }
-
-    /**
-     * Return true if the values of the two {@link Coordinate} are equal when their
-     * first and second ordinates are cast as ints. Ignores 3rd ordinate.
-     *
-     * @param a first coordinate to compare
-     * @param b second coordinate to compare
-     * @return true if the values of the two {@link Coordinate} are equal when their
-     * first and second ordinates are cast as ints
-     */
-    private static boolean equalAsInts2d(Coordinate a, Coordinate b) {
-        return ((int)a.getOrdinate(0)) == ((int)b.getOrdinate(0))
-                && ((int)a.getOrdinate(1)) == ((int)b.getOrdinate(1));
     }
 
     /**
